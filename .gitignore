@@ -1,0 +1,34 @@
+# ── API Keys ──────────────────────────────
+.env
+
+# ── Virtual Environment ───────────────────
+.venv/
+venv/
+env/
+
+# ── Vector Databases ──────────────────────
+chroma_db/
+vector store/
+
+# ── PDF Files ─────────────────────────────
+*.pdf
+document loaders/
+
+# ── Python Cache ──────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── VS Code (optional - local settings) ───
+.vscode/
+
+# ── OS Files ──────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Misc ──────────────────────────────────
+notes.txt
+*.log
+*.tmp
+Codex Installer.exe
+Microsoft.Services.St*
