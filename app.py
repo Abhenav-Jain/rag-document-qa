@@ -199,11 +199,20 @@ def get_prompt():
 Use ONLY the provided context to answer the question.
 
 If the answer is not present in the context,
-say: "I could not find the answer in the document." """
+say: "I could not find the answer in the document."
+"""
         ),
         (
             "human",
-            "Context:\n{context}\n\nQuestion:\n{question}"
+            """Chat History:
+{history}
+
+Context:
+{context}
+
+Question:
+{question}
+"""
         ),
     ])
 
@@ -260,6 +269,18 @@ def safe_html(text: str) -> str:
         .replace(">", "&gt;")
         .replace("\n", "<br>")
     )
+
+# ================= NEW: QUERY REWRITE =================
+def rewrite_query(llm, query):
+    from langchain_core.prompts import ChatPromptTemplate
+
+    rewrite_prompt = ChatPromptTemplate.from_messages([
+        ("system", "Rewrite the user query to make it clearer and better for document retrieval."),
+        ("human", "{query}")
+    ])
+
+    res = llm.invoke(rewrite_prompt.invoke({"query": query}))
+    return res.content
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -563,25 +584,57 @@ if query:
     if not st.session_state.rag_ready:
         st.warning("⚡ Please click **Init RAG** in the sidebar first.")
     else:
+        # ================= ADD USER FIRST (for UI) =================
         st.session_state.messages.append({"role": "user", "content": query})
 
         with st.spinner("Retrieving context & generating answer…"):
             t0 = time.time()
             try:
-                docs    = st.session_state.retriever.invoke(query)
+                # ================= MEMORY (exclude current query) =================
+                history_text = "\n".join([
+                    f"User: {m['content']}" if m["role"] == "user"
+                    else f"Assistant: {m['content']}"
+                    for m in st.session_state.messages[-7:-1]   # 🔥 key fix
+                ])
+
+                # ================= QUERY REWRITE =================
+                better_query = rewrite_query(st.session_state.llm, query)
+
+                # ================= RETRIEVAL =================
+                docs = st.session_state.retriever.invoke(better_query)
                 context = "\n\n".join([d.page_content for d in docs])
-                fmt     = st.session_state.prompt.invoke({"context": context, "question": query})
-                result  = st.session_state.llm.invoke(fmt)
+
+                # ================= PROMPT =================
+                fmt = st.session_state.prompt.invoke({
+                    "context": context,
+                    "question": query,
+                    "history": history_text
+                })
+
+                # ================= LLM =================
+                result = st.session_state.llm.invoke(fmt)
 
                 latency = round((time.time() - t0) * 1000)
                 answer  = result.content
+
+                # ================= LOGGING =================
+                with open("logs.txt", "a", encoding="utf-8") as f:
+                    f.write(f"\nUser: {query}\n")
+                    f.write(f"Rewritten: {better_query}\n")
+                    f.write(f"Answer: {answer}\n")
+                    f.write(f"Latency: {latency}ms\n")
+                    f.write("-" * 50)
+
+                # ================= SOURCES =================
                 sources = list({
                     d.metadata.get("source", "document")
                      .replace("\\", "/").split("/")[-1]
                     for d in docs
                 })
-                chunks  = [d.page_content for d in docs]
 
+                chunks = [d.page_content for d in docs]
+
+                # ================= STORE RESPONSE =================
                 st.session_state.messages.append({
                     "role":    "assistant",
                     "content": answer,
@@ -589,8 +642,11 @@ if query:
                     "chunks":  chunks,
                     "latency": latency,
                 })
+
+                # ================= STATS =================
                 st.session_state.query_count   += 1
                 st.session_state.total_latency += latency
+
                 if "could not find" not in answer.lower():
                     st.session_state.hit_count += 1
 
